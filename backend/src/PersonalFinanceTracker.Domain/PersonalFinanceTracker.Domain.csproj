@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>PersonalFinanceTracker.Domain</RootNamespace>
+  </PropertyGroup>
+</Project>

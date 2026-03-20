@@ -1,0 +1,20 @@
+services:
+  postgres:
+    image: docker.io/library/postgres:16-alpine
+    container_name: pft-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-personal_finance_tracker}
+      POSTGRES_USER: ${POSTGRES_USER:-finance_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-finance_password}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data:Z
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-finance_user} -d ${POSTGRES_DB:-personal_finance_tracker}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
