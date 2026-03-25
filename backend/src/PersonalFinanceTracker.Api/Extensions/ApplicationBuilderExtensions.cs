@@ -18,6 +18,7 @@ public static class ApplicationBuilderExtensions
         app.UseRouting();
         app.UseCors("Frontend");
         app.UseHttpsRedirection();
+        app.UseRateLimiter();
         app.UseAuthentication();
         app.UseAuthorization();
         app.MapControllers();
@@ -30,5 +31,10 @@ public static class ApplicationBuilderExtensions
         await using var scope = app.Services.CreateAsyncScope();
         var initializer = scope.ServiceProvider.GetRequiredService<DatabaseInitializer>();
         await initializer.InitializeAsync();
+
+        if (app.Environment.IsDevelopment())
+        {
+            await initializer.SeedDemoDataForExistingUsersAsync();
+        }
     }
 }

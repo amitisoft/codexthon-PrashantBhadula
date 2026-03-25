@@ -1,6 +1,7 @@
 import axios from "axios";
 import { FormEvent, useEffect, useState } from "react";
 import { PageIntro } from "@/components/ui/PageIntro";
+import { useTimedMessage } from "@/hooks/useTimedMessage";
 import { api } from "@/services/api";
 import type { Budget, Category } from "@/types/api";
 
@@ -18,7 +19,7 @@ export function BudgetsPage() {
   const [budgets, setBudgets] = useState<Budget[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState(initialForm);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useTimedMessage();
 
   async function loadData() {
     const [categoriesResponse, budgetsResponse] = await Promise.all([
@@ -59,6 +60,26 @@ export function BudgetsPage() {
     }
   }
 
+  async function duplicateLastMonth() {
+    setMessage(null);
+
+    try {
+      await api.post("/budgets/duplicate-last-month", {
+        month: Number(form.month),
+        year: Number(form.year),
+      });
+
+      setMessage("Last month budgets were duplicated successfully.");
+      await loadData();
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        setMessage(error.response?.data?.message ?? "Failed to duplicate last month budgets.");
+      } else {
+        setMessage("Failed to duplicate last month budgets.");
+      }
+    }
+  }
+
   return (
     <section className="space-y-6">
       <PageIntro
@@ -69,10 +90,16 @@ export function BudgetsPage() {
 
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <form className="space-y-4 rounded-xl2 border border-border bg-canvas p-6" onSubmit={onSubmit}>
-          <h3 className="text-xl font-semibold">Set Monthly Budget</h3>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xl font-semibold">Set Monthly Budget</h3>
+            <button className="rounded-2xl border border-border px-4 py-2 text-sm font-semibold text-ink" onClick={duplicateLastMonth} type="button">
+              Duplicate Last Month
+            </button>
+          </div>
 
           <select
             className="w-full rounded-2xl border border-border px-4 py-3"
+            data-empty={form.categoryId === "" ? "true" : "false"}
             onChange={(event) => setForm((current) => ({ ...current, categoryId: event.target.value }))}
             required
             value={form.categoryId}

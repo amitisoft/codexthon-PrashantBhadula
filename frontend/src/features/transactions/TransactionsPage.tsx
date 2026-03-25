@@ -1,7 +1,9 @@
 import axios from "axios";
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Lightbulb, Sparkles } from "lucide-react";
 import { useSearchParams } from "react-router-dom";
 import { PageIntro } from "@/components/ui/PageIntro";
+import { useTimedMessage } from "@/hooks/useTimedMessage";
 import { api } from "@/services/api";
 import type { Account, Category, Transaction } from "@/types/api";
 
@@ -40,10 +42,13 @@ export function TransactionsPage() {
     search: searchParams.get("search") ?? "",
   }));
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [pendingDelete, setPendingDelete] = useState<Transaction | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [message, setMessage] = useTimedMessage();
 
   const accountLookup = useMemo(() => Object.fromEntries(accounts.map((account) => [account.id, account.name])), [accounts]);
   const categoryLookup = useMemo(() => Object.fromEntries(categories.map((category) => [category.id, category.name])), [categories]);
+  const editableAccounts = accounts.filter((account) => account.accessRole !== "viewer");
 
   async function loadMeta() {
     const [accountsResponse, categoriesResponse] = await Promise.all([
@@ -54,8 +59,9 @@ export function TransactionsPage() {
     setAccounts(accountsResponse.data);
     setCategories(categoriesResponse.data);
 
-    if (!form.accountId && accountsResponse.data[0]) {
-      setForm((current) => ({ ...current, accountId: accountsResponse.data[0].id }));
+    const defaultAccount = accountsResponse.data.find((account) => account.accessRole !== "viewer");
+    if (!form.accountId && defaultAccount) {
+      setForm((current) => ({ ...current, accountId: defaultAccount.id }));
     }
   }
 
@@ -86,9 +92,73 @@ export function TransactionsPage() {
   }, [searchParams]);
 
   const filteredCategories = categories.filter((category) => category.type === form.type);
-  const destinationAccounts = accounts.filter((account) => account.id !== form.accountId);
+  const destinationAccounts = editableAccounts.filter((account) => account.id !== form.accountId);
   const accountFieldLabel = form.type === "transfer" ? "Source account" : form.type === "income" ? "Deposit to account" : "Pay from account";
   const merchantPlaceholder = form.type === "transfer" ? "Transfer note or label" : form.type === "income" ? "Received from" : "Merchant or payee";
+  const smartSuggestions = useMemo(() => {
+    const merchant = form.merchant.trim().toLowerCase();
+    if (!merchant || form.type === "transfer") {
+      return null;
+    }
+
+    const matches = transactions.filter((transaction) => {
+      const candidate = transaction.merchant?.trim().toLowerCase() ?? "";
+      return candidate.length > 0 && (candidate.includes(merchant) || merchant.includes(candidate)) && transaction.type === form.type;
+    });
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    const categoryCounts = new Map<string, number>();
+    const paymentMethodCounts = new Map<string, number>();
+    const noteCounts = new Map<string, number>();
+
+    matches.forEach((transaction) => {
+      if (transaction.categoryId) {
+        categoryCounts.set(transaction.categoryId, (categoryCounts.get(transaction.categoryId) ?? 0) + 1);
+      }
+      if (transaction.paymentMethod) {
+        paymentMethodCounts.set(transaction.paymentMethod, (paymentMethodCounts.get(transaction.paymentMethod) ?? 0) + 1);
+      }
+      if (transaction.note) {
+        noteCounts.set(transaction.note, (noteCounts.get(transaction.note) ?? 0) + 1);
+      }
+    });
+
+    const mostFrequent = (entries: Map<string, number>) =>
+      [...entries.entries()].sort((left, right) => right[1] - left[1])[0]?.[0] ?? null;
+
+    const suggestedCategoryId = mostFrequent(categoryCounts);
+    const suggestedPaymentMethod = mostFrequent(paymentMethodCounts);
+    const suggestedNote = mostFrequent(noteCounts);
+    const averageAmount = Math.round(matches.reduce((total, transaction) => total + transaction.amount, 0) / matches.length);
+    const recurringHint = isLikelyRecurring(matches);
+
+    return {
+      count: matches.length,
+      suggestedCategoryId,
+      suggestedPaymentMethod,
+      suggestedNote,
+      averageAmount,
+      recurringHint,
+    };
+  }, [form.merchant, form.type, transactions]);
+
+  useEffect(() => {
+    if (!editableAccounts.length) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      accountId: editableAccounts.some((account) => account.id === current.accountId) ? current.accountId : editableAccounts[0].id,
+      destinationAccountId:
+        current.type === "transfer" && current.destinationAccountId && editableAccounts.some((account) => account.id === current.destinationAccountId)
+          ? current.destinationAccountId
+          : "",
+    }));
+  }, [editableAccounts]);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -134,6 +204,7 @@ export function TransactionsPage() {
 
   async function deleteTransaction(transactionId: string) {
     setMessage(null);
+    setIsDeleting(true);
 
     try {
       await api.delete(`/transactions/${transactionId}`);
@@ -141,11 +212,14 @@ export function TransactionsPage() {
         setEditingId(null);
         setForm(initialForm);
       }
+      setPendingDelete(null);
       setMessage("Transaction deleted successfully.");
       await loadMeta();
       await loadTransactions();
     } catch {
       setMessage("Failed to delete transaction.");
+    } finally {
+      setIsDeleting(false);
     }
   }
 
@@ -165,6 +239,21 @@ export function TransactionsPage() {
     });
   }
 
+  function applySmartSuggestions() {
+    if (!smartSuggestions) {
+      return;
+    }
+
+    setForm((current) => ({
+      ...current,
+      categoryId: current.categoryId || smartSuggestions.suggestedCategoryId || current.categoryId,
+      paymentMethod: current.paymentMethod || smartSuggestions.suggestedPaymentMethod || current.paymentMethod,
+      note: current.note || smartSuggestions.suggestedNote || current.note,
+      amount: current.amount || (smartSuggestions.averageAmount ? smartSuggestions.averageAmount.toString() : current.amount),
+    }));
+    setMessage("Suggested fields applied.");
+  }
+
   return (
     <section className="space-y-6">
       <PageIntro
@@ -176,7 +265,7 @@ export function TransactionsPage() {
       <section className="rounded-xl2 border border-border bg-canvas p-6">
         <div className="grid gap-4 lg:grid-cols-6">
           <input
-            className="rounded-2xl border border-border px-4 py-3"
+            className="rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             onChange={(event) => setFilters((current) => ({ ...current, from: event.target.value }))}
             type="date"
             value={filters.from}
@@ -189,6 +278,7 @@ export function TransactionsPage() {
           />
           <select
             className="rounded-2xl border border-border px-4 py-3"
+            data-empty={filters.accountId === "" ? "true" : "false"}
             onChange={(event) => setFilters((current) => ({ ...current, accountId: event.target.value }))}
             value={filters.accountId}
           >
@@ -201,6 +291,7 @@ export function TransactionsPage() {
           </select>
           <select
             className="rounded-2xl border border-border px-4 py-3"
+            data-empty={filters.categoryId === "" ? "true" : "false"}
             onChange={(event) => setFilters((current) => ({ ...current, categoryId: event.target.value }))}
             value={filters.categoryId}
           >
@@ -213,6 +304,7 @@ export function TransactionsPage() {
           </select>
           <select
             className="rounded-2xl border border-border px-4 py-3"
+            data-empty={filters.type === "" ? "true" : "false"}
             onChange={(event) => setFilters((current) => ({ ...current, type: event.target.value }))}
             value={filters.type}
           >
@@ -255,7 +347,8 @@ export function TransactionsPage() {
           <h3 className="text-xl font-semibold">{editingId ? "Edit Transaction" : "New Transaction"}</h3>
 
           <select
-            className="w-full rounded-2xl border border-border px-4 py-3"
+            className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
+            data-empty={form.type === "" ? "true" : "false"}
             onChange={(event) =>
               setForm((current) => ({
                 ...current,
@@ -274,15 +367,17 @@ export function TransactionsPage() {
           <label className="block text-sm text-ink/75">
             {accountFieldLabel}
             <select
-              className="mt-2 w-full rounded-2xl border border-border px-4 py-3"
+              className="mt-2 w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
+              data-empty={form.accountId === "" ? "true" : "false"}
               onChange={(event) => setForm((current) => ({ ...current, accountId: event.target.value }))}
               required
               value={form.accountId}
             >
               <option value="">{accountFieldLabel}</option>
-              {accounts.map((account) => (
+              {editableAccounts.map((account) => (
                 <option key={account.id} value={account.id}>
                   {account.name}
+                  {account.isShared ? ` (${account.accessRole})` : ""}
                 </option>
               ))}
             </select>
@@ -293,6 +388,7 @@ export function TransactionsPage() {
               Destination account
               <select
                 className="mt-2 w-full rounded-2xl border border-border px-4 py-3"
+                data-empty={form.destinationAccountId === "" ? "true" : "false"}
                 onChange={(event) => setForm((current) => ({ ...current, destinationAccountId: event.target.value }))}
                 required
                 value={form.destinationAccountId}
@@ -310,6 +406,7 @@ export function TransactionsPage() {
               Category
               <select
                 className="mt-2 w-full rounded-2xl border border-border px-4 py-3"
+                data-empty={form.categoryId === "" ? "true" : "false"}
                 onChange={(event) => setForm((current) => ({ ...current, categoryId: event.target.value }))}
                 required={form.type !== "transfer"}
                 value={form.categoryId}
@@ -325,7 +422,7 @@ export function TransactionsPage() {
           )}
 
           <input
-            className="w-full rounded-2xl border border-border px-4 py-3"
+            className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             min="0.01"
             onChange={(event) => setForm((current) => ({ ...current, amount: event.target.value }))}
             placeholder="Amount"
@@ -336,7 +433,7 @@ export function TransactionsPage() {
           />
 
           <input
-            className="w-full rounded-2xl border border-border px-4 py-3"
+            className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             onChange={(event) => setForm((current) => ({ ...current, transactionDate: event.target.value }))}
             required
             type="date"
@@ -353,6 +450,52 @@ export function TransactionsPage() {
             />
           </label>
 
+          {smartSuggestions ? (
+            <div className="premium-card-soft rounded-[1.2rem] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="flex items-center gap-2 text-sm font-semibold text-ink">
+                    <Sparkles className="h-4 w-4 text-primary" />
+                    Smart suggestions available
+                  </p>
+                  <p className="mt-2 text-sm leading-6 text-ink/62">
+                    Found {smartSuggestions.count} similar {form.type} {smartSuggestions.count === 1 ? "entry" : "entries"} for this merchant.
+                  </p>
+                </div>
+                <button className="premium-button premium-button-secondary rounded-xl px-3 py-2 text-xs" onClick={applySmartSuggestions} type="button">
+                  Apply
+                </button>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {smartSuggestions.suggestedCategoryId ? (
+                  <div className="rounded-[1rem] border border-border/70 bg-white/60 px-3 py-2.5 text-sm text-ink/70">
+                    Likely category: <span className="font-semibold text-ink">{categoryLookup[smartSuggestions.suggestedCategoryId] ?? "Category"}</span>
+                  </div>
+                ) : null}
+                {smartSuggestions.suggestedPaymentMethod ? (
+                  <div className="rounded-[1rem] border border-border/70 bg-white/60 px-3 py-2.5 text-sm text-ink/70">
+                    Likely payment method: <span className="font-semibold text-ink">{smartSuggestions.suggestedPaymentMethod}</span>
+                  </div>
+                ) : null}
+                {smartSuggestions.averageAmount > 0 ? (
+                  <div className="rounded-[1rem] border border-border/70 bg-white/60 px-3 py-2.5 text-sm text-ink/70">
+                    Typical amount: <span className="font-semibold text-ink">Rs {smartSuggestions.averageAmount.toLocaleString("en-IN")}</span>
+                  </div>
+                ) : null}
+                {smartSuggestions.recurringHint ? (
+                  <div className="rounded-[1rem] border border-border/70 bg-white/60 px-3 py-2.5 text-sm text-ink/70">
+                    <span className="inline-flex items-center gap-2 font-semibold text-primary">
+                      <Lightbulb className="h-4 w-4" />
+                      Looks recurring
+                    </span>
+                    <p className="mt-1 text-sm text-ink/60">This merchant appears repeatedly. Consider creating a recurring item or rule.</p>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+
           <input
             className="w-full rounded-2xl border border-border px-4 py-3"
             onChange={(event) => setForm((current) => ({ ...current, paymentMethod: event.target.value }))}
@@ -361,7 +504,7 @@ export function TransactionsPage() {
           />
 
           <textarea
-            className="min-h-24 w-full rounded-2xl border border-border px-4 py-3"
+            className="min-h-24 w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))}
             placeholder="Note"
             value={form.note}
@@ -389,49 +532,80 @@ export function TransactionsPage() {
         </form>
 
         <section className="rounded-xl2 border border-border bg-canvas p-6">
-          <h3 className="text-xl font-semibold">Recent Transactions</h3>
-          <div className="mt-5 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h3 className="text-xl font-semibold">Recent Transactions</h3>
+              <p className="mt-1 text-sm text-ink/60">Showing up to 100 entries in a denser, scrollable list.</p>
+            </div>
+            <p className="rounded-full bg-primary/8 px-3 py-1 text-xs font-semibold text-primary">
+              {transactions.length} {transactions.length === 1 ? "transaction" : "transactions"}
+            </p>
+          </div>
+
+          <div className="mt-5 max-h-[780px] space-y-2 overflow-y-auto pr-1">
             {transactions.length === 0 ? (
               <p className="text-sm text-ink/65">No transactions matched your current filters.</p>
             ) : (
               transactions.map((transaction) => (
-                <article key={transaction.id} className="rounded-2xl bg-white p-4">
-                  <div className="flex items-start justify-between gap-4">
-                    <div>
-                      <p className="font-semibold text-ink">{transaction.merchant || "Manual Entry"}</p>
+                <article key={transaction.id} className="surface-panel rounded-2xl border border-border/80 p-3">
+                  <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-ink">{transaction.merchant || "Manual Entry"}</p>
+                        <span className="rounded-full bg-canvas px-2.5 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-ink/55">
+                          {transaction.type}
+                        </span>
+                      </div>
                       <p className="mt-1 text-sm text-ink/55">
                         {transaction.type} • {transaction.transactionDate} • {accountLookup[transaction.accountId] ?? "Account"}
                         {transaction.destinationAccountId ? ` → ${accountLookup[transaction.destinationAccountId] ?? "Account"}` : ""}
                       </p>
+                      {transaction.createdByDisplayName ? (
+                        <p className="mt-1 text-sm text-ink/55">Added by {transaction.createdByDisplayName}</p>
+                      ) : null}
                       <p className="mt-1 text-sm text-ink/55">
                         {transaction.categoryId ? categoryLookup[transaction.categoryId] ?? "Category" : "No category"}
                       </p>
-                      {transaction.note ? <p className="mt-2 text-sm text-ink/60">{transaction.note}</p> : null}
+                      {transaction.appliedRuleNames.length > 0 || transaction.needsReview ? (
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          {transaction.appliedRuleNames.map((ruleName) => (
+                            <span key={ruleName} className="rounded-full bg-primary/8 px-2.5 py-1 text-[11px] font-semibold text-primary">
+                              Rule: {ruleName}
+                            </span>
+                          ))}
+                          {transaction.needsReview ? (
+                            <span className="rounded-full bg-danger/10 px-2.5 py-1 text-[11px] font-semibold text-danger">Needs review</span>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {transaction.note ? (
+                        <p className="mt-2 line-clamp-2 text-sm leading-6 text-ink/60">{transaction.note}</p>
+                      ) : null}
                     </div>
-                    <div className="text-right">
+                    <div className="flex flex-col gap-3 lg:min-w-[180px] lg:items-end">
                       <p
                         className={
                           transaction.type === "income"
-                            ? "text-lg font-semibold text-success"
+                            ? "text-base font-semibold text-success"
                             : transaction.type === "expense"
-                              ? "text-lg font-semibold text-danger"
-                              : "text-lg font-semibold text-primary"
+                              ? "text-base font-semibold text-danger"
+                              : "text-base font-semibold text-primary"
                         }
                       >
                         {transaction.type === "income" ? "+" : transaction.type === "expense" ? "-" : ""}Rs{" "}
                         {transaction.amount.toLocaleString("en-IN")}
                       </p>
-                      <div className="mt-3 flex gap-2">
+                      <div className="flex flex-wrap gap-2 lg:justify-end">
                         <button
-                          className="rounded-2xl border border-border px-3 py-2 text-sm font-semibold text-ink"
+                          className="rounded-2xl border border-border px-3 py-1.5 text-sm font-semibold text-ink"
                           onClick={() => startEdit(transaction)}
                           type="button"
                         >
                           Edit
                         </button>
                         <button
-                          className="rounded-2xl bg-ink px-3 py-2 text-sm font-semibold text-white"
-                          onClick={() => deleteTransaction(transaction.id)}
+                          className="rounded-2xl bg-danger px-3 py-1.5 text-sm font-semibold text-white transition hover:opacity-90"
+                          onClick={() => setPendingDelete(transaction)}
                           type="button"
                         >
                           Delete
@@ -445,6 +619,72 @@ export function TransactionsPage() {
           </div>
         </section>
       </div>
+
+      {pendingDelete ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/45 px-4 backdrop-blur-md">
+          <div className="modal-panel w-full max-w-md rounded-[1.6rem] p-6">
+            <div className="flex items-start gap-4">
+              <div className="flex h-11 w-11 items-center justify-center rounded-full bg-danger/12 text-danger">
+                <AlertTriangle className="h-5 w-5" />
+              </div>
+              <div className="flex-1">
+                <h3 className="text-xl font-semibold text-ink">Delete this transaction?</h3>
+                <p className="mt-2 text-sm leading-6 text-ink/65">
+                  This will permanently remove{" "}
+                  <span className="font-semibold text-ink">
+                    {pendingDelete.merchant || "this transaction"}
+                  </span>{" "}
+                  for Rs {pendingDelete.amount.toLocaleString("en-IN")} from your records.
+                </p>
+                <p className="mt-2 text-sm text-ink/55">
+                  {pendingDelete.transactionDate} • {pendingDelete.type}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap justify-end gap-3">
+              <button
+                className="premium-button premium-button-secondary text-sm"
+                onClick={() => setPendingDelete(null)}
+                type="button"
+              >
+                Cancel
+              </button>
+              <button
+                className="premium-button rounded-2xl bg-danger px-5 py-3 text-sm font-semibold text-white transition hover:opacity-90 disabled:opacity-60"
+                disabled={isDeleting}
+                onClick={() => deleteTransaction(pendingDelete.id)}
+                type="button"
+              >
+                {isDeleting ? "Deleting..." : "Delete Transaction"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </section>
   );
+}
+
+function isLikelyRecurring(matches: Transaction[]) {
+  if (matches.length < 3) {
+    return false;
+  }
+
+  const dates = matches
+    .map((transaction) => new Date(transaction.transactionDate))
+    .filter((date) => !Number.isNaN(date.getTime()))
+    .sort((left, right) => left.getTime() - right.getTime());
+
+  if (dates.length < 3) {
+    return false;
+  }
+
+  const intervals = [];
+  for (let index = 1; index < dates.length; index += 1) {
+    intervals.push(Math.round((dates[index].getTime() - dates[index - 1].getTime()) / (1000 * 60 * 60 * 24)));
+  }
+
+  const monthlyLikeIntervals = intervals.filter((days) => days >= 24 && days <= 38).length;
+  return monthlyLikeIntervals >= 2;
 }

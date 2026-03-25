@@ -1,6 +1,7 @@
 import axios from "axios";
 import { FormEvent, useEffect, useState } from "react";
 import { PageIntro } from "@/components/ui/PageIntro";
+import { useTimedMessage } from "@/hooks/useTimedMessage";
 import { api } from "@/services/api";
 import type { Account, Category, RecurringTransaction } from "@/types/api";
 
@@ -24,7 +25,9 @@ export function RecurringPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState(initialForm);
-  const [message, setMessage] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [message, setMessage] = useTimedMessage();
+  const editableAccounts = accounts.filter((account) => account.accessRole !== "viewer");
 
   async function loadData() {
     const [itemsResponse, accountsResponse, categoriesResponse] = await Promise.all([
@@ -47,17 +50,24 @@ export function RecurringPage() {
     setMessage(null);
 
     try {
-      await api.post("/recurring", {
+      const payload = {
         ...form,
         amount: Number(form.amount),
         categoryId: form.categoryId || null,
         accountId: form.accountId || null,
         endDate: form.endDate || null,
         nextRunDate: form.nextRunDate || null,
-      });
+      };
+
+      if (editingId) {
+        await api.put(`/recurring/${editingId}`, payload);
+      } else {
+        await api.post("/recurring", payload);
+      }
 
       setForm(initialForm);
-      setMessage("Recurring item created successfully.");
+      setEditingId(null);
+      setMessage(editingId ? "Recurring item updated successfully." : "Recurring item created successfully.");
       await loadData();
     } catch (error) {
       if (axios.isAxiosError(error)) {
@@ -66,6 +76,40 @@ export function RecurringPage() {
         setMessage("Failed to create recurring item.");
       }
     }
+  }
+
+  async function togglePause(item: RecurringTransaction) {
+    setMessage(null);
+    await api.post(`/recurring/${item.id}/pause`);
+    setMessage(item.isPaused ? "Recurring item resumed." : "Recurring item paused.");
+    await loadData();
+  }
+
+  async function deleteItem(itemId: string) {
+    setMessage(null);
+    await api.delete(`/recurring/${itemId}`);
+    setMessage("Recurring item deleted.");
+    if (editingId === itemId) {
+      setEditingId(null);
+      setForm(initialForm);
+    }
+    await loadData();
+  }
+
+  function startEdit(item: RecurringTransaction) {
+    setEditingId(item.id);
+    setForm({
+      title: item.title,
+      type: item.type,
+      amount: item.amount.toString(),
+      categoryId: item.categoryId ?? "",
+      accountId: item.accountId ?? "",
+      frequency: item.frequency,
+      startDate: item.startDate,
+      endDate: item.endDate ?? "",
+      nextRunDate: item.nextRunDate,
+      autoCreateTransaction: item.autoCreateTransaction,
+    });
   }
 
   return (
@@ -78,10 +122,24 @@ export function RecurringPage() {
 
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <form className="space-y-4 rounded-xl2 border border-border bg-canvas p-6" onSubmit={onSubmit}>
-          <h3 className="text-xl font-semibold">New Recurring Item</h3>
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="text-xl font-semibold">{editingId ? "Edit Recurring Item" : "New Recurring Item"}</h3>
+            {editingId ? (
+              <button
+                className="rounded-2xl border border-border px-4 py-2 text-sm font-semibold text-ink"
+                onClick={() => {
+                  setEditingId(null);
+                  setForm(initialForm);
+                }}
+                type="button"
+              >
+                Cancel
+              </button>
+            ) : null}
+          </div>
 
           <input
-            className="w-full rounded-2xl border border-border px-4 py-3"
+            className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             onChange={(event) => setForm((current) => ({ ...current, title: event.target.value }))}
             placeholder="Netflix"
             required
@@ -90,7 +148,8 @@ export function RecurringPage() {
 
           <div className="grid grid-cols-2 gap-3">
             <select
-              className="w-full rounded-2xl border border-border px-4 py-3"
+              className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
+              data-empty={form.type === "" ? "true" : "false"}
               onChange={(event) => setForm((current) => ({ ...current, type: event.target.value, categoryId: "" }))}
               value={form.type}
             >
@@ -110,6 +169,7 @@ export function RecurringPage() {
 
           <select
             className="w-full rounded-2xl border border-border px-4 py-3"
+            data-empty={form.categoryId === "" ? "true" : "false"}
             onChange={(event) => setForm((current) => ({ ...current, categoryId: event.target.value }))}
             value={form.categoryId}
           >
@@ -123,11 +183,12 @@ export function RecurringPage() {
 
           <select
             className="w-full rounded-2xl border border-border px-4 py-3"
+            data-empty={form.accountId === "" ? "true" : "false"}
             onChange={(event) => setForm((current) => ({ ...current, accountId: event.target.value }))}
             value={form.accountId}
           >
             <option value="">Select account</option>
-            {accounts.map((account) => (
+            {editableAccounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name}
               </option>
@@ -137,6 +198,7 @@ export function RecurringPage() {
           <div className="grid grid-cols-2 gap-3">
             <select
               className="w-full rounded-2xl border border-border px-4 py-3"
+              data-empty={form.frequency === "" ? "true" : "false"}
               onChange={(event) => setForm((current) => ({ ...current, frequency: event.target.value }))}
               value={form.frequency}
             >
@@ -154,10 +216,19 @@ export function RecurringPage() {
             />
           </div>
 
+          <label className="flex items-center gap-3 rounded-2xl border border-border/70 bg-canvas/60 px-4 py-3 text-sm text-ink/70">
+            <input
+              checked={form.autoCreateTransaction}
+              onChange={(event) => setForm((current) => ({ ...current, autoCreateTransaction: event.target.checked }))}
+              type="checkbox"
+            />
+            Auto-create transactions when this recurring item becomes due
+          </label>
+
           {message ? <p className="text-sm text-ink/70">{message}</p> : null}
 
           <button className="rounded-2xl bg-primary px-5 py-3 text-sm font-semibold text-white" type="submit">
-            Save Recurring Item
+            {editingId ? "Save Changes" : "Save Recurring Item"}
           </button>
         </form>
 
@@ -171,12 +242,33 @@ export function RecurringPage() {
                 <article key={item.id} className="rounded-2xl bg-white p-4">
                   <div className="flex items-center justify-between gap-3">
                     <div>
-                      <p className="font-semibold text-ink">{item.title}</p>
+                      <div className="flex items-center gap-2">
+                        <p className="font-semibold text-ink">{item.title}</p>
+                        {item.isPaused ? (
+                          <span className="rounded-full bg-warning/15 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-ink">Paused</span>
+                        ) : null}
+                        {item.autoCreateTransaction ? (
+                          <span className="rounded-full bg-success/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-success">Auto</span>
+                        ) : null}
+                      </div>
                       <p className="mt-1 text-sm text-ink/55">
                         {item.frequency} • next due {item.nextRunDate}
                       </p>
                     </div>
-                    <p className="font-semibold text-danger">Rs {item.amount.toLocaleString("en-IN")}</p>
+                    <div className="text-right">
+                      <p className="font-semibold text-danger">Rs {item.amount.toLocaleString("en-IN")}</p>
+                      <div className="mt-3 flex flex-wrap justify-end gap-2">
+                        <button className="rounded-2xl border border-border px-3 py-1.5 text-sm font-semibold text-ink" onClick={() => startEdit(item)} type="button">
+                          Edit
+                        </button>
+                        <button className="rounded-2xl bg-primary-soft px-3 py-1.5 text-sm font-semibold text-white" onClick={() => togglePause(item)} type="button">
+                          {item.isPaused ? "Resume" : "Pause"}
+                        </button>
+                        <button className="rounded-2xl bg-danger px-3 py-1.5 text-sm font-semibold text-white" onClick={() => deleteItem(item.id)} type="button">
+                          Delete
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </article>
               ))

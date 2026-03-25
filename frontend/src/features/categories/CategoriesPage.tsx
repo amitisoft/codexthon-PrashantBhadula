@@ -1,6 +1,7 @@
 import axios from "axios";
 import { FormEvent, useEffect, useState } from "react";
 import { PageIntro } from "@/components/ui/PageIntro";
+import { useTimedMessage } from "@/hooks/useTimedMessage";
 import { api } from "@/services/api";
 import type { Category } from "@/types/api";
 
@@ -14,7 +15,7 @@ export function CategoriesPage() {
   const [categories, setCategories] = useState<Category[]>([]);
   const [form, setForm] = useState(initialForm);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useTimedMessage();
 
   async function loadCategories() {
     const { data } = await api.get<Category[]>("/categories", { params: { includeArchived: true } });
@@ -98,6 +99,7 @@ export function CategoriesPage() {
 
           <select
             className="w-full rounded-2xl border border-border px-4 py-3"
+            data-empty={form.type === "" ? "true" : "false"}
             onChange={(event) => setForm((current) => ({ ...current, type: event.target.value }))}
             value={form.type}
           >
@@ -182,7 +184,7 @@ export function CategoriesPage() {
                               Edit
                             </button>
                             <button
-                              className="rounded-2xl bg-ink px-4 py-2 text-sm font-semibold text-white"
+                              className="rounded-2xl bg-danger px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
                               onClick={() => archiveCategory(category.id)}
                               type="button"
                             >
@@ -228,7 +230,7 @@ export function CategoriesPage() {
                             Edit
                           </button>
                           <button
-                            className="rounded-2xl bg-ink px-4 py-2 text-sm font-semibold text-white"
+                            className="rounded-2xl bg-danger px-4 py-2 text-sm font-semibold text-white transition hover:opacity-90"
                             onClick={() => archiveCategory(category.id)}
                             type="button"
                           >

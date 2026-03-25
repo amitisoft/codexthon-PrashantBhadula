@@ -14,3 +14,5 @@ public sealed record BudgetDto(
     int AlertThresholdPercent);
 
 public sealed record CreateBudgetRequest(Guid CategoryId, int Month, int Year, decimal Amount, int AlertThresholdPercent);
+
+public sealed record DuplicateBudgetRequest(int Month, int Year);

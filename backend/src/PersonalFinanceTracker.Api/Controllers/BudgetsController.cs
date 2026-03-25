@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PersonalFinanceTracker.Application.DTOs.Budgets;
 using PersonalFinanceTracker.Application.Interfaces;
 using PersonalFinanceTracker.Domain.Entities;
@@ -116,6 +117,8 @@ public sealed class BudgetsController(ApplicationDbContext dbContext, IUserConte
 
         dbContext.Budgets.Add(budget);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await HttpContext.RequestServices.GetRequiredService<IProductEventService>()
+            .TrackAsync("budget_created", userContext.UserId, new { budget.CategoryId, budget.Month, budget.Year }, cancellationToken);
 
         return Ok(new BudgetDto(
             budget.Id,
@@ -129,5 +132,51 @@ public sealed class BudgetsController(ApplicationDbContext dbContext, IUserConte
             0,
             "on-track",
             budget.AlertThresholdPercent));
+    }
+
+    [HttpPost("duplicate-last-month")]
+    public async Task<ActionResult<IReadOnlyList<BudgetDto>>> DuplicateLastMonth(DuplicateBudgetRequest request, CancellationToken cancellationToken)
+    {
+        var targetMonth = request.Month;
+        var targetYear = request.Year;
+        var sourceDate = new DateOnly(targetYear, targetMonth, 1).AddMonths(-1);
+
+        var sourceBudgets = await dbContext.Budgets
+            .Where(x => x.UserId == userContext.UserId && x.Month == sourceDate.Month && x.Year == sourceDate.Year)
+            .ToListAsync(cancellationToken);
+
+        if (sourceBudgets.Count == 0)
+        {
+            return BadRequest(new { message = "No budgets were found in the previous month to duplicate." });
+        }
+
+        var existingCategoryIds = await dbContext.Budgets
+            .Where(x => x.UserId == userContext.UserId && x.Month == targetMonth && x.Year == targetYear)
+            .Select(x => x.CategoryId)
+            .ToListAsync(cancellationToken);
+
+        var budgetsToCreate = sourceBudgets
+            .Where(x => !existingCategoryIds.Contains(x.CategoryId))
+            .Select(sourceBudget => new Budget
+            {
+                Id = Guid.NewGuid(),
+                UserId = userContext.UserId,
+                CategoryId = sourceBudget.CategoryId,
+                Month = targetMonth,
+                Year = targetYear,
+                Amount = sourceBudget.Amount,
+                AlertThresholdPercent = sourceBudget.AlertThresholdPercent,
+            })
+            .ToList();
+
+        if (budgetsToCreate.Count == 0)
+        {
+            return Conflict(new { message = "All previous month budgets already exist in the selected month." });
+        }
+
+        dbContext.Budgets.AddRange(budgetsToCreate);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return await Get(targetMonth, targetYear, cancellationToken);
     }
 }

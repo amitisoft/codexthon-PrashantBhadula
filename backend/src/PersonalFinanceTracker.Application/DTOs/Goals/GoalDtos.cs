@@ -9,6 +9,7 @@ public sealed record GoalDto(
     DateOnly? TargetDate,
     string Status,
     Guid? LinkedAccountId,
+    string? Icon,
     string? Color);
 
 public sealed record CreateGoalRequest(
@@ -17,6 +18,7 @@ public sealed record CreateGoalRequest(
     decimal CurrentAmount,
     DateOnly? TargetDate,
     Guid? LinkedAccountId,
+    string? Icon,
     string? Color);
 
 public sealed record GoalAmountRequest(decimal Amount, Guid? AccountId);
