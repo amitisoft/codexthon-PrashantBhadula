@@ -7,6 +7,7 @@ type AuthState = {
   refreshToken: string | null;
   user: AuthUser | null;
   setSession: (input: { accessToken: string; refreshToken: string; user: AuthUser }) => void;
+  updateUser: (user: AuthUser) => void;
   clearSession: () => void;
 };
 
@@ -19,6 +20,9 @@ export const useAuthStore = create<AuthState>()(
       setSession: ({ accessToken, refreshToken, user }) => {
         localStorage.setItem("pft-access-token", accessToken);
         set({ accessToken, refreshToken, user });
+      },
+      updateUser: (user) => {
+        set((state) => ({ ...state, user }));
       },
       clearSession: () => {
         localStorage.removeItem("pft-access-token");

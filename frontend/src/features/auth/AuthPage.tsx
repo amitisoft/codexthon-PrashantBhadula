@@ -106,7 +106,12 @@ export function AuthPage() {
   return (
     <div className="auth-page-bg flex min-h-screen items-center justify-center px-4">
       <div className="grid w-full max-w-5xl gap-6 lg:grid-cols-[0.95fr_1.05fr]">
-        <section className="auth-hero-bg rounded-xl2 border border-border p-8 text-white shadow-panel">
+        <section className="auth-hero-bg premium-border relative overflow-hidden rounded-xl2 p-8 text-white shadow-panel">
+          <div className="pointer-events-none absolute inset-0 opacity-90">
+            <div className="absolute -right-12 top-10 h-40 w-40 rounded-full bg-white/10 blur-3xl" />
+            <div className="absolute -left-8 bottom-8 h-32 w-32 rounded-full bg-accent/20 blur-3xl" />
+          </div>
+          <div className="relative">
           <FitraLogo
             className="items-start text-left"
             onDark
@@ -121,6 +126,7 @@ export function AuthPage() {
             <p>Create accounts for bank, wallet, or card balances.</p>
             <p>Track expenses and income against real categories.</p>
             <p>Build toward budgets, goals, reports, and recurring payments.</p>
+          </div>
           </div>
         </section>
 

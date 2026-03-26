@@ -13,6 +13,12 @@ export type AuthResponse = {
   user: AuthUser;
 };
 
+export type UserSettings = {
+  currencyCode: string;
+  locale: string;
+  timeZone: string;
+};
+
 export type Account = {
   id: string;
   name: string;

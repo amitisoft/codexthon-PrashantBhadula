@@ -1,6 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Bell, ChevronRight, Command, Plus, Search } from "lucide-react";
-import { NavLink, Outlet, useNavigate } from "react-router-dom";
+import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { appNavItems } from "@/app/navigation";
 import { FitraLogo } from "@/components/branding/FitraLogo";
 import { QuickActionsPalette } from "@/components/ui/QuickActionsPalette";
@@ -11,6 +11,7 @@ import type { NotificationItem } from "@/types/api";
 
 export function AppShell() {
   const navigate = useNavigate();
+  const location = useLocation();
   const user = useAuthStore((state) => state.user);
   const clearSession = useAuthStore((state) => state.clearSession);
   const [searchTerm, setSearchTerm] = useState("");
@@ -38,6 +39,14 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
+  function isNavItemActive(path: string, pathname: string) {
+    if (path === "/") {
+      return pathname === "/";
+    }
+
+    return pathname === path || pathname.startsWith(`${path}/`);
+  }
+
   function onSearch(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -52,56 +61,58 @@ export function AppShell() {
   return (
     <div className="app-page-bg min-h-screen text-ink">
       <div className="mx-auto grid min-h-screen max-w-[1440px] grid-cols-1 gap-6 px-4 py-4 lg:grid-cols-[288px_1fr] lg:px-6 lg:py-6">
-        <aside className="surface-panel premium-border rounded-[1.75rem] p-5 shadow-panel backdrop-blur lg:sticky lg:top-6 lg:h-[calc(100vh-3rem)] lg:overflow-hidden">
-          <div className="mb-8">
+        <aside className="surface-panel premium-border flex flex-col self-start rounded-[1.75rem] p-5 shadow-panel backdrop-blur lg:sticky lg:top-6">
+          <div className="mb-6">
             <FitraLogo className="items-start text-left" compact subtitle="Modern way to manage money" />
             <p className="mt-3 text-sm leading-6 text-ink/65">
               Manage accounts, transactions, budgets, goals, and recurring payments with calm financial clarity.
             </p>
           </div>
 
-          <nav className="space-y-2">
-            {appNavItems.map((item) => {
-              const Icon = item.icon;
+          <div className="pr-1">
+            <nav className="space-y-1.5">
+              {appNavItems.map((item) => {
+                const Icon = item.icon;
+                const isActive = isNavItemActive(item.path, location.pathname);
 
-              return (
-                <NavLink
-                  key={item.path}
-                  to={item.path}
-                  className={({ isActive }) =>
-                    [
-                      "group flex items-center justify-between rounded-[1.25rem] px-4 py-3.5 transition",
-                      isActive ? "bg-primary text-white shadow-panel" : "premium-card-soft text-ink/82 hover:border-border/90 hover:bg-canvas hover:text-ink",
-                    ].join(" ")
-                  }
-                >
-                  {({ isActive }) => (
-                    <>
-                      <div className="flex items-center gap-3">
-                        <Icon className={isActive ? "h-5 w-5 text-white" : "h-5 w-5 text-primary"} />
-                        <div>
-                          <p className="text-sm font-semibold">{item.label}</p>
-                          <p className={isActive ? "text-xs text-white/75" : "text-xs text-ink/45"}>
-                            {item.description}
-                          </p>
-                        </div>
+                return (
+                  <NavLink
+                    key={item.path}
+                    to={item.path}
+                    className={() =>
+                      [
+                        "group flex items-center justify-between rounded-[1.15rem] px-4 py-3 transition",
+                        isActive ? "bg-primary text-white shadow-panel" : "premium-card-soft text-ink/82 hover:border-border/90 hover:bg-canvas hover:text-ink",
+                      ].join(" ")
+                    }
+                  >
+                    <div className="flex items-center gap-3">
+                      <Icon className={isActive ? "h-5 w-5 text-white" : "h-5 w-5 text-primary"} />
+                      <div>
+                        <p className="text-sm font-semibold">{item.label}</p>
+                        <p className={isActive ? "text-xs text-white/75" : "text-xs text-ink/45"}>
+                          {item.description}
+                        </p>
                       </div>
-                      <ChevronRight className={isActive ? "h-4 w-4 text-white/70" : "h-4 w-4 text-ink/30 transition group-hover:translate-x-0.5"} />
-                    </>
-                  )}
-                </NavLink>
-              );
-            })}
-          </nav>
+                    </div>
+                    <ChevronRight className={isActive ? "h-4 w-4 text-white/70" : "h-4 w-4 text-ink/30 transition group-hover:translate-x-0.5"} />
+                  </NavLink>
+                );
+              })}
+            </nav>
+          </div>
 
-          <div className="premium-card mt-8 rounded-[1.35rem] p-4">
+          <div className="premium-card mt-5 shrink-0 rounded-[1.2rem] p-3.5">
             <p className="text-xs uppercase tracking-[0.2em] text-ink/45">Signed in as</p>
-            <p className="mt-3 text-lg font-semibold tracking-[-0.02em] text-ink">{user?.displayName ?? "User"}</p>
-            <p className="mt-1 text-sm text-ink/55">
-              {user?.email} • {user?.currencyCode}/{user?.locale}
+            <p className="mt-2 text-base font-semibold tracking-[-0.02em] text-ink">{user?.displayName ?? "User"}</p>
+            <p className="mt-1 break-words text-xs leading-5 text-ink/55">
+              {user?.email}
+            </p>
+            <p className="mt-1 text-xs text-ink/55">
+              {user?.currencyCode}/{user?.locale}
             </p>
             <button
-              className="premium-button premium-button-secondary mt-4 w-full text-sm"
+              className="premium-button premium-button-secondary mt-3 w-full py-3 text-sm"
               onClick={clearSession}
               type="button"
             >

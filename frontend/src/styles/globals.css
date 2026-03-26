@@ -112,7 +112,16 @@ select[data-empty="false"] {
 }
 
 .auth-hero-bg {
-  background: linear-gradient(180deg, rgba(var(--color-primary), 0.94), rgba(var(--color-accent), 0.88));
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.18), transparent 28%),
+    linear-gradient(160deg, rgba(18, 64, 104, 0.98), rgba(29, 96, 126, 0.95) 58%, rgba(51, 130, 110, 0.92));
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+.dark .auth-hero-bg {
+  background:
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.1), transparent 26%),
+    linear-gradient(165deg, rgba(13, 22, 30, 0.98), rgba(19, 44, 56, 0.96) 55%, rgba(22, 79, 73, 0.92));
 }
 
 .surface-panel {
