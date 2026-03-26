@@ -10,6 +10,7 @@ import { GoalsPage } from "@/features/goals/GoalsPage";
 import { OnboardingPage } from "@/features/onboarding/OnboardingPage";
 import { RecurringPage } from "@/features/recurring/RecurringPage";
 import { ReportsPage } from "@/features/reports/ReportsPage";
+import { RulesPage } from "@/features/rules/RulesPage";
 import { SettingsPage } from "@/features/settings/SettingsPage";
 import { TransactionsPage } from "@/features/transactions/TransactionsPage";
 
@@ -26,6 +27,7 @@ export function AppRouter() {
           <Route path="categories" element={<CategoriesPage />} />
           <Route path="goals" element={<GoalsPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="rules" element={<RulesPage />} />
           <Route path="recurring" element={<RecurringPage />} />
           <Route path="settings" element={<SettingsPage />} />
           <Route path="onboarding" element={<OnboardingPage />} />

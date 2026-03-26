@@ -14,6 +14,8 @@ public sealed class Transaction
     public string? Note { get; set; }
     public string? PaymentMethod { get; set; }
     public string[] Tags { get; set; } = [];
+    public string[] AppliedRuleNames { get; set; } = [];
+    public bool NeedsReview { get; set; }
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime UpdatedAtUtc { get; set; } = DateTime.UtcNow;
 }

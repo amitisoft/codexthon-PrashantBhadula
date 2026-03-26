@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PersonalFinanceTracker.Application.DTOs.Dashboard;
 using PersonalFinanceTracker.Application.Interfaces;
 using PersonalFinanceTracker.Infrastructure.Persistence;
@@ -18,13 +19,16 @@ public sealed class DashboardController(ApplicationDbContext dbContext, IUserCon
         var today = DateTime.UtcNow;
         var monthStart = new DateOnly(today.Year, today.Month, 1);
         var monthEnd = monthStart.AddMonths(1).AddDays(-1);
+        var visibleAccountIds = await HttpContext.RequestServices
+            .GetRequiredService<IAccountAccessService>()
+            .GetVisibleAccountIdsAsync(userContext.UserId, cancellationToken);
 
         var accounts = await dbContext.Accounts
-            .Where(x => x.UserId == userContext.UserId)
+            .Where(x => visibleAccountIds.Contains(x.Id))
             .ToListAsync(cancellationToken);
 
         var transactions = await dbContext.Transactions
-            .Where(x => x.UserId == userContext.UserId)
+            .Where(x => visibleAccountIds.Contains(x.AccountId))
             .OrderByDescending(x => x.TransactionDate)
             .ThenByDescending(x => x.CreatedAtUtc)
             .ToListAsync(cancellationToken);
@@ -43,7 +47,7 @@ public sealed class DashboardController(ApplicationDbContext dbContext, IUserCon
             .ToListAsync(cancellationToken);
 
         var recurring = await dbContext.RecurringTransactions
-            .Where(x => x.UserId == userContext.UserId && !x.IsPaused && x.NextRunDate >= monthStart)
+            .Where(x => x.AccountId != null && visibleAccountIds.Contains(x.AccountId.Value) && !x.IsPaused && x.NextRunDate >= monthStart)
             .OrderBy(x => x.NextRunDate)
             .Take(5)
             .ToListAsync(cancellationToken);

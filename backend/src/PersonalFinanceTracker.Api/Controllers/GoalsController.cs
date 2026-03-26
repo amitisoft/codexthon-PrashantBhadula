@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PersonalFinanceTracker.Application.DTOs.Goals;
 using PersonalFinanceTracker.Application.Interfaces;
 using PersonalFinanceTracker.Domain.Entities;
@@ -35,9 +36,9 @@ public sealed class GoalsController(ApplicationDbContext dbContext, IUserContext
 
         if (request.LinkedAccountId is not null)
         {
-            var accountExists = await dbContext.Accounts.AnyAsync(
-                x => x.Id == request.LinkedAccountId && x.UserId == userContext.UserId,
-                cancellationToken);
+            var accountExists = await HttpContext.RequestServices
+                .GetRequiredService<IAccountAccessService>()
+                .CanEditAccountAsync(userContext.UserId, request.LinkedAccountId.Value, cancellationToken);
 
             if (!accountExists)
             {
@@ -54,12 +55,15 @@ public sealed class GoalsController(ApplicationDbContext dbContext, IUserContext
             CurrentAmount = request.CurrentAmount < 0 ? 0 : request.CurrentAmount,
             TargetDate = request.TargetDate,
             LinkedAccountId = request.LinkedAccountId,
+            Icon = string.IsNullOrWhiteSpace(request.Icon) ? null : request.Icon.Trim(),
             Color = request.Color,
             Status = request.CurrentAmount >= request.TargetAmount ? "completed" : "active",
         };
 
         dbContext.Goals.Add(goal);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await HttpContext.RequestServices.GetRequiredService<IProductEventService>()
+            .TrackAsync("goal_created", userContext.UserId, new { goal.Id, goal.Name }, cancellationToken);
 
         return Ok(MapGoal(goal));
     }
@@ -80,8 +84,16 @@ public sealed class GoalsController(ApplicationDbContext dbContext, IUserContext
 
         if (request.AccountId is not null)
         {
+            var canEditAccount = await HttpContext.RequestServices
+                .GetRequiredService<IAccountAccessService>()
+                .CanEditAccountAsync(userContext.UserId, request.AccountId.Value, cancellationToken);
+            if (!canEditAccount)
+            {
+                return BadRequest(new { message = "Account was not found." });
+            }
+
             var account = await dbContext.Accounts.FirstOrDefaultAsync(
-                x => x.Id == request.AccountId && x.UserId == userContext.UserId,
+                x => x.Id == request.AccountId,
                 cancellationToken);
 
             if (account is null)
@@ -97,6 +109,8 @@ public sealed class GoalsController(ApplicationDbContext dbContext, IUserContext
         goal.Status = goal.CurrentAmount >= goal.TargetAmount ? "completed" : "active";
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await HttpContext.RequestServices.GetRequiredService<IActivityLogService>()
+            .LogAsync(userContext.UserId, userContext.UserId, request.AccountId, "contributed", "goal", goal.Id, $"Rs {request.Amount:N0} was added to goal {goal.Name}.", cancellationToken);
         return Ok(MapGoal(goal));
     }
 
@@ -121,8 +135,16 @@ public sealed class GoalsController(ApplicationDbContext dbContext, IUserContext
 
         if (request.AccountId is not null)
         {
+            var canEditAccount = await HttpContext.RequestServices
+                .GetRequiredService<IAccountAccessService>()
+                .CanEditAccountAsync(userContext.UserId, request.AccountId.Value, cancellationToken);
+            if (!canEditAccount)
+            {
+                return BadRequest(new { message = "Account was not found." });
+            }
+
             var account = await dbContext.Accounts.FirstOrDefaultAsync(
-                x => x.Id == request.AccountId && x.UserId == userContext.UserId,
+                x => x.Id == request.AccountId,
                 cancellationToken);
 
             if (account is null)
@@ -138,6 +160,8 @@ public sealed class GoalsController(ApplicationDbContext dbContext, IUserContext
         goal.Status = goal.CurrentAmount >= goal.TargetAmount ? "completed" : "active";
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await HttpContext.RequestServices.GetRequiredService<IActivityLogService>()
+            .LogAsync(userContext.UserId, userContext.UserId, request.AccountId, "withdrew", "goal", goal.Id, $"Rs {request.Amount:N0} was withdrawn from goal {goal.Name}.", cancellationToken);
         return Ok(MapGoal(goal));
     }
 
@@ -153,6 +177,7 @@ public sealed class GoalsController(ApplicationDbContext dbContext, IUserContext
             goal.TargetDate,
             goal.Status,
             goal.LinkedAccountId,
+            goal.Icon,
             goal.Color);
     }
 }

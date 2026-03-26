@@ -4,6 +4,8 @@ using BCrypt.Net;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.Extensions.DependencyInjection;
 using PersonalFinanceTracker.Application.DTOs.Auth;
 using PersonalFinanceTracker.Application.Interfaces;
 using PersonalFinanceTracker.Domain.Entities;
@@ -21,6 +23,7 @@ public sealed class AuthController(
     IUserContext userContext,
     IConfiguration configuration) : ControllerBase
 {
+    [EnableRateLimiting("auth")]
     [HttpPost("register")]
     public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request, CancellationToken cancellationToken)
     {
@@ -51,11 +54,14 @@ public sealed class AuthController(
         dbContext.UserSettings.Add(settings);
         await dbContext.SaveChangesAsync(cancellationToken);
         await databaseInitializer.SeedDefaultCategoriesForUserAsync(user.Id, cancellationToken);
+        await HttpContext.RequestServices.GetRequiredService<IProductEventService>()
+            .TrackAsync("signup_completed", user.Id, new { user.Email }, cancellationToken);
 
         var authResponse = jwtTokenService.CreateAuthResponse(user, settings);
         return Ok(authResponse);
     }
 
+    [EnableRateLimiting("auth")]
     [HttpPost("login")]
     public async Task<ActionResult<AuthResponse>> Login(LoginRequest request, CancellationToken cancellationToken)
     {
@@ -71,6 +77,7 @@ public sealed class AuthController(
         return Ok(authResponse);
     }
 
+    [EnableRateLimiting("auth")]
     [HttpPost("refresh")]
     public async Task<ActionResult<AuthResponse>> Refresh(RefreshRequest request, CancellationToken cancellationToken)
     {
@@ -93,6 +100,7 @@ public sealed class AuthController(
         return Ok(authResponse);
     }
 
+    [EnableRateLimiting("auth")]
     [HttpPost("forgot-password")]
     public async Task<IActionResult> ForgotPassword(ForgotPasswordRequest request, CancellationToken cancellationToken)
     {
@@ -123,6 +131,7 @@ public sealed class AuthController(
         return Ok();
     }
 
+    [EnableRateLimiting("auth")]
     [HttpPost("reset-password")]
     public async Task<IActionResult> ResetPassword(ResetPasswordRequest request, CancellationToken cancellationToken)
     {

@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   PieChart,
   RefreshCcw,
+  Sparkles,
   Settings,
 } from "lucide-react";
 
@@ -55,6 +56,12 @@ export const appNavItems: AppNavItem[] = [
     path: "/reports",
     icon: FolderKanban,
     description: "Insights and exports",
+  },
+  {
+    label: "Rules",
+    path: "/rules",
+    icon: Sparkles,
+    description: "Automation and categorization rules",
   },
   {
     label: "Recurring",

@@ -7,10 +7,14 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<Account> Accounts => Set<Account>();
+    public DbSet<AccountMember> AccountMembers => Set<AccountMember>();
+    public DbSet<AccountActivityLog> AccountActivityLogs => Set<AccountActivityLog>();
     public DbSet<Category> Categories => Set<Category>();
     public DbSet<Transaction> Transactions => Set<Transaction>();
+    public DbSet<Rule> Rules => Set<Rule>();
     public DbSet<Budget> Budgets => Set<Budget>();
     public DbSet<Goal> Goals => Set<Goal>();
+    public DbSet<ProductEvent> ProductEvents => Set<ProductEvent>();
     public DbSet<RecurringTransaction> RecurringTransactions => Set<RecurringTransaction>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
@@ -23,6 +27,9 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.HasDefaultSchema("finance");
 
         modelBuilder.Entity<User>().HasIndex(x => x.Email).IsUnique();
+        modelBuilder.Entity<AccountMember>().HasIndex(x => new { x.AccountId, x.UserId }).IsUnique();
+        modelBuilder.Entity<AccountActivityLog>().HasIndex(x => new { x.UserId, x.CreatedAtUtc });
+        modelBuilder.Entity<ProductEvent>().HasIndex(x => new { x.EventName, x.CreatedAtUtc });
         modelBuilder.Entity<RefreshToken>().HasIndex(x => x.Token).IsUnique();
         modelBuilder.Entity<PasswordResetToken>().HasIndex(x => x.TokenHash).IsUnique();
         modelBuilder.Entity<Account>().Property(x => x.CurrentBalance).HasPrecision(12, 2);
@@ -32,6 +39,7 @@ public sealed class ApplicationDbContext(DbContextOptions<ApplicationDbContext> 
         modelBuilder.Entity<Goal>().Property(x => x.TargetAmount).HasPrecision(12, 2);
         modelBuilder.Entity<Goal>().Property(x => x.CurrentAmount).HasPrecision(12, 2);
         modelBuilder.Entity<RecurringTransaction>().Property(x => x.Amount).HasPrecision(12, 2);
+        modelBuilder.Entity<Rule>().HasIndex(x => new { x.UserId, x.Priority });
 
         modelBuilder.Entity<UserSettings>()
             .HasIndex(x => x.UserId)

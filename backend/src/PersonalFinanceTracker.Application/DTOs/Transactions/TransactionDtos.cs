@@ -12,6 +12,9 @@ public sealed record TransactionDto(
     string? Note,
     string? PaymentMethod,
     string[] Tags,
+    string[] AppliedRuleNames,
+    bool NeedsReview,
+    string? CreatedByDisplayName,
     DateTime CreatedAtUtc);
 
 public sealed record CreateTransactionRequest(

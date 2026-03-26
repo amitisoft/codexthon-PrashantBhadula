@@ -25,3 +25,15 @@ public sealed record CreateRecurringTransactionRequest(
     DateOnly? EndDate,
     DateOnly? NextRunDate,
     bool AutoCreateTransaction);
+
+public sealed record UpdateRecurringTransactionRequest(
+    string Title,
+    string Type,
+    decimal Amount,
+    Guid? CategoryId,
+    Guid? AccountId,
+    string Frequency,
+    DateOnly StartDate,
+    DateOnly? EndDate,
+    DateOnly? NextRunDate,
+    bool AutoCreateTransaction);

@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using PersonalFinanceTracker.Application.DTOs.Transactions;
 using PersonalFinanceTracker.Application.Interfaces;
 using PersonalFinanceTracker.Domain.Entities;
@@ -20,7 +21,8 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
         [FromQuery] TransactionQueryRequest request,
         CancellationToken cancellationToken)
     {
-        var query = dbContext.Transactions.Where(x => x.UserId == userContext.UserId);
+        var visibleAccountIds = await GetVisibleAccountIdsAsync(cancellationToken);
+        var query = dbContext.Transactions.Where(x => visibleAccountIds.Contains(x.AccountId));
 
         if (request.From is not null)
         {
@@ -56,6 +58,11 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
             .ThenByDescending(x => x.CreatedAtUtc)
             .ToListAsync(cancellationToken);
 
+        var creatorIds = transactions.Select(x => x.UserId).Distinct().ToList();
+        var creatorLookup = await dbContext.Users
+            .Where(x => creatorIds.Contains(x.Id))
+            .ToDictionaryAsync(x => x.Id, x => x.DisplayName, cancellationToken);
+
         if (request.AccountId is not null)
         {
             transactions = transactions
@@ -65,26 +72,35 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
 
         transactions = transactions.Take(100).ToList();
 
-        return Ok(transactions.Select(MapTransaction).ToList());
+        return Ok(transactions.Select(transaction => MapTransaction(transaction, creatorLookup)).ToList());
     }
 
     [HttpGet("{id:guid}")]
     public async Task<ActionResult<TransactionDto>> GetById(Guid id, CancellationToken cancellationToken)
     {
+        var visibleAccountIds = await GetVisibleAccountIdsAsync(cancellationToken);
         var transaction = await dbContext.Transactions
-            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userContext.UserId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && visibleAccountIds.Contains(x.AccountId), cancellationToken);
 
         if (transaction is null)
         {
             return NotFound();
         }
 
-        return Ok(MapTransaction(transaction));
+        var createdByDisplayName = await dbContext.Users
+            .Where(x => x.Id == transaction.UserId)
+            .Select(x => x.DisplayName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Ok(MapTransaction(transaction, createdByDisplayName));
     }
 
     [HttpPost]
     public async Task<ActionResult<TransactionDto>> Create(CreateTransactionRequest request, CancellationToken cancellationToken)
     {
+        var evaluatedRuleResult = await ApplyRulesAsync(request, cancellationToken);
+        request = evaluatedRuleResult.Request;
+
         var validationError = await ValidateRequestAsync(request, cancellationToken);
         if (validationError is not null)
         {
@@ -104,6 +120,8 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
             Note = Normalize(request.Note),
             PaymentMethod = Normalize(request.PaymentMethod),
             Tags = BuildTags(request.Tags, request.DestinationAccountId),
+            AppliedRuleNames = [.. evaluatedRuleResult.AppliedRuleNames],
+            NeedsReview = evaluatedRuleResult.NeedsReview,
             CreatedAtUtc = DateTime.UtcNow,
             UpdatedAtUtc = DateTime.UtcNow,
         };
@@ -112,19 +130,43 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
         dbContext.Transactions.Add(transaction);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(MapTransaction(transaction));
+        var productEventService = HttpContext.RequestServices.GetRequiredService<IProductEventService>();
+        if (!await dbContext.Transactions.AnyAsync(x => x.UserId == userContext.UserId && x.Id != transaction.Id, cancellationToken))
+        {
+            await productEventService.TrackAsync("first_transaction_added", userContext.UserId, new { transaction.Id, transaction.Amount, transaction.Type }, cancellationToken);
+        }
+
+        await HttpContext.RequestServices.GetRequiredService<IActivityLogService>()
+            .LogAsync(userContext.UserId, userContext.UserId, transaction.AccountId, "created", "transaction", transaction.Id, $"{transaction.Type} transaction for Rs {transaction.Amount:N0} was added.", cancellationToken);
+
+        var createdByDisplayName = await dbContext.Users
+            .Where(x => x.Id == transaction.UserId)
+            .Select(x => x.DisplayName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Ok(MapTransaction(transaction, createdByDisplayName));
     }
 
     [HttpPut("{id:guid}")]
     public async Task<ActionResult<TransactionDto>> Update(Guid id, CreateTransactionRequest request, CancellationToken cancellationToken)
     {
+        var visibleAccountIds = await GetVisibleAccountIdsAsync(cancellationToken);
+        var editableAccountIds = await GetEditableAccountIdsAsync(cancellationToken);
         var transaction = await dbContext.Transactions
-            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userContext.UserId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && visibleAccountIds.Contains(x.AccountId), cancellationToken);
 
         if (transaction is null)
         {
             return NotFound();
         }
+
+        if (!editableAccountIds.Contains(transaction.AccountId))
+        {
+            return Forbid();
+        }
+
+        var evaluatedRuleResult = await ApplyRulesAsync(request, cancellationToken);
+        request = evaluatedRuleResult.Request;
 
         var validationError = await ValidateRequestAsync(request, cancellationToken);
         if (validationError is not null)
@@ -143,28 +185,48 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
         transaction.Note = Normalize(request.Note);
         transaction.PaymentMethod = Normalize(request.PaymentMethod);
         transaction.Tags = BuildTags(request.Tags, request.DestinationAccountId);
+        transaction.AppliedRuleNames = [.. evaluatedRuleResult.AppliedRuleNames];
+        transaction.NeedsReview = evaluatedRuleResult.NeedsReview;
         transaction.UpdatedAtUtc = DateTime.UtcNow;
 
         await ApplyTransactionImpactAsync(transaction, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(MapTransaction(transaction));
+        await HttpContext.RequestServices.GetRequiredService<IActivityLogService>()
+            .LogAsync(userContext.UserId, userContext.UserId, transaction.AccountId, "updated", "transaction", transaction.Id, $"{transaction.Type} transaction for Rs {transaction.Amount:N0} was updated.", cancellationToken);
+
+        var createdByDisplayName = await dbContext.Users
+            .Where(x => x.Id == transaction.UserId)
+            .Select(x => x.DisplayName)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Ok(MapTransaction(transaction, createdByDisplayName));
     }
 
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
+        var visibleAccountIds = await GetVisibleAccountIdsAsync(cancellationToken);
+        var editableAccountIds = await GetEditableAccountIdsAsync(cancellationToken);
         var transaction = await dbContext.Transactions
-            .FirstOrDefaultAsync(x => x.Id == id && x.UserId == userContext.UserId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == id && visibleAccountIds.Contains(x.AccountId), cancellationToken);
 
         if (transaction is null)
         {
             return NotFound();
         }
 
+        if (!editableAccountIds.Contains(transaction.AccountId))
+        {
+            return Forbid();
+        }
+
         await ReverseTransactionImpactAsync(transaction, cancellationToken);
         dbContext.Transactions.Remove(transaction);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await HttpContext.RequestServices.GetRequiredService<IActivityLogService>()
+            .LogAsync(userContext.UserId, userContext.UserId, transaction.AccountId, "deleted", "transaction", transaction.Id, $"{transaction.Type} transaction for Rs {transaction.Amount:N0} was deleted.", cancellationToken);
 
         return NoContent();
     }
@@ -182,8 +244,14 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
             return BadRequest(new { message = "Transaction type must be income, expense, or transfer." });
         }
 
+        var editableAccountIds = await GetEditableAccountIdsAsync(cancellationToken);
+        if (!editableAccountIds.Contains(request.AccountId))
+        {
+            return BadRequest(new { message = "Account is not editable for this user." });
+        }
+
         var account = await dbContext.Accounts
-            .FirstOrDefaultAsync(x => x.Id == request.AccountId && x.UserId == userContext.UserId, cancellationToken);
+            .FirstOrDefaultAsync(x => x.Id == request.AccountId, cancellationToken);
 
         if (account is null)
         {
@@ -202,9 +270,12 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
                 return BadRequest(new { message = "Transfer destination must be different from the source account." });
             }
 
-            var destinationExists = await dbContext.Accounts.AnyAsync(
-                x => x.Id == request.DestinationAccountId.Value && x.UserId == userContext.UserId,
-                cancellationToken);
+            if (!editableAccountIds.Contains(request.DestinationAccountId.Value))
+            {
+                return BadRequest(new { message = "Destination account is not editable for this user." });
+            }
+
+            var destinationExists = await dbContext.Accounts.AnyAsync(x => x.Id == request.DestinationAccountId.Value, cancellationToken);
 
             if (!destinationExists)
             {
@@ -239,7 +310,7 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
     private async Task ApplyTransactionImpactAsync(Transaction transaction, CancellationToken cancellationToken)
     {
         var sourceAccount = await dbContext.Accounts
-            .FirstAsync(x => x.Id == transaction.AccountId && x.UserId == userContext.UserId, cancellationToken);
+            .FirstAsync(x => x.Id == transaction.AccountId, cancellationToken);
 
         if (transaction.Type == "income")
         {
@@ -256,7 +327,7 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
         if (transaction.Type == "transfer" && destinationAccountId is not null)
         {
             var destinationAccount = await dbContext.Accounts
-                .FirstAsync(x => x.Id == destinationAccountId.Value && x.UserId == userContext.UserId, cancellationToken);
+                .FirstAsync(x => x.Id == destinationAccountId.Value, cancellationToken);
 
             destinationAccount.CurrentBalance += transaction.Amount;
             destinationAccount.LastUpdatedAtUtc = DateTime.UtcNow;
@@ -266,7 +337,7 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
     private async Task ReverseTransactionImpactAsync(Transaction transaction, CancellationToken cancellationToken)
     {
         var sourceAccount = await dbContext.Accounts
-            .FirstAsync(x => x.Id == transaction.AccountId && x.UserId == userContext.UserId, cancellationToken);
+            .FirstAsync(x => x.Id == transaction.AccountId, cancellationToken);
 
         if (transaction.Type == "income")
         {
@@ -283,14 +354,17 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
         if (transaction.Type == "transfer" && destinationAccountId is not null)
         {
             var destinationAccount = await dbContext.Accounts
-                .FirstAsync(x => x.Id == destinationAccountId.Value && x.UserId == userContext.UserId, cancellationToken);
+                .FirstAsync(x => x.Id == destinationAccountId.Value, cancellationToken);
 
             destinationAccount.CurrentBalance -= transaction.Amount;
             destinationAccount.LastUpdatedAtUtc = DateTime.UtcNow;
         }
     }
 
-    private static TransactionDto MapTransaction(Transaction transaction)
+    private static TransactionDto MapTransaction(Transaction transaction, IReadOnlyDictionary<Guid, string> creatorLookup)
+        => MapTransaction(transaction, creatorLookup.TryGetValue(transaction.UserId, out var createdByDisplayName) ? createdByDisplayName : null);
+
+    private static TransactionDto MapTransaction(Transaction transaction, string? createdByDisplayName)
     {
         return new TransactionDto(
             transaction.Id,
@@ -304,7 +378,28 @@ public sealed class TransactionsController(ApplicationDbContext dbContext, IUser
             transaction.Note,
             transaction.PaymentMethod,
             FilterUserTags(transaction.Tags),
+            transaction.AppliedRuleNames,
+            transaction.NeedsReview,
+            createdByDisplayName,
             transaction.CreatedAtUtc);
+    }
+
+    private async Task<RuleEvaluationResult> ApplyRulesAsync(CreateTransactionRequest request, CancellationToken cancellationToken)
+    {
+        var rulesEngine = HttpContext.RequestServices.GetRequiredService<IRulesEngineService>();
+        return await rulesEngine.ApplyAsync(userContext.UserId, request, cancellationToken);
+    }
+
+    private async Task<IReadOnlySet<Guid>> GetVisibleAccountIdsAsync(CancellationToken cancellationToken)
+    {
+        var accountAccessService = HttpContext.RequestServices.GetRequiredService<IAccountAccessService>();
+        return await accountAccessService.GetVisibleAccountIdsAsync(userContext.UserId, cancellationToken);
+    }
+
+    private async Task<IReadOnlySet<Guid>> GetEditableAccountIdsAsync(CancellationToken cancellationToken)
+    {
+        var accountAccessService = HttpContext.RequestServices.GetRequiredService<IAccountAccessService>();
+        return await accountAccessService.GetEditableAccountIdsAsync(userContext.UserId, cancellationToken);
     }
 
     private static string? Normalize(string? value) => string.IsNullOrWhiteSpace(value) ? null : value.Trim();

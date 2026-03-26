@@ -7,7 +7,19 @@ public sealed record AccountDto(
     decimal OpeningBalance,
     decimal CurrentBalance,
     string? InstitutionName,
-    DateTime CreatedAtUtc);
+    DateTime CreatedAtUtc,
+    bool IsShared,
+    bool IsOwner,
+    string AccessRole,
+    IReadOnlyList<AccountMemberDto> Members);
+
+public sealed record AccountMemberDto(
+    Guid UserId,
+    string DisplayName,
+    string Email,
+    string Role,
+    bool IsOwner,
+    DateTime AddedAtUtc);
 
 public sealed record CreateAccountRequest(
     string Name,
@@ -19,6 +31,10 @@ public sealed record UpdateAccountRequest(
     string Name,
     string Type,
     string? InstitutionName);
+
+public sealed record ShareAccountRequest(
+    string Email,
+    string Role);
 
 public sealed record AccountTransferRequest(
     Guid FromAccountId,

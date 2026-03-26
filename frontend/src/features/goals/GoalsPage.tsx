@@ -1,6 +1,7 @@
 import axios from "axios";
 import { FormEvent, useEffect, useState } from "react";
 import { PageIntro } from "@/components/ui/PageIntro";
+import { useTimedMessage } from "@/hooks/useTimedMessage";
 import { api } from "@/services/api";
 import type { Account, Goal } from "@/types/api";
 
@@ -10,6 +11,7 @@ const initialForm = {
   currentAmount: "0",
   targetDate: "",
   linkedAccountId: "",
+  icon: "shield",
   color: "#4C8A87",
 };
 
@@ -17,9 +19,10 @@ export function GoalsPage() {
   const [goals, setGoals] = useState<Goal[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [form, setForm] = useState(initialForm);
-  const [message, setMessage] = useState<string | null>(null);
+  const [message, setMessage] = useTimedMessage();
   const [contributionAmounts, setContributionAmounts] = useState<Record<string, string>>({});
   const [withdrawAmounts, setWithdrawAmounts] = useState<Record<string, string>>({});
+  const editableAccounts = accounts.filter((account) => account.accessRole !== "viewer");
 
   async function loadData() {
     const [goalsResponse, accountsResponse] = await Promise.all([
@@ -103,7 +106,7 @@ export function GoalsPage() {
           <h3 className="text-xl font-semibold">New Savings Goal</h3>
 
           <input
-            className="w-full rounded-2xl border border-border px-4 py-3"
+            className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))}
             placeholder="Emergency Fund"
             required
@@ -111,7 +114,7 @@ export function GoalsPage() {
           />
 
           <input
-            className="w-full rounded-2xl border border-border px-4 py-3"
+            className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             onChange={(event) => setForm((current) => ({ ...current, targetAmount: event.target.value }))}
             placeholder="Target amount"
             required
@@ -120,12 +123,35 @@ export function GoalsPage() {
           />
 
           <input
-            className="w-full rounded-2xl border border-border px-4 py-3"
+            className="w-full rounded-2xl border border-border px-4 py-3 placeholder:text-ink/25 dark:placeholder:text-ink/30"
             onChange={(event) => setForm((current) => ({ ...current, currentAmount: event.target.value }))}
             placeholder="Current amount"
             type="number"
             value={form.currentAmount}
           />
+
+          <div className="grid gap-3 md:grid-cols-2">
+            <select
+              className="w-full rounded-2xl border border-border px-4 py-3"
+              data-empty={form.icon === "" ? "true" : "false"}
+              onChange={(event) => setForm((current) => ({ ...current, icon: event.target.value }))}
+              value={form.icon}
+            >
+              <option value="shield">Emergency</option>
+              <option value="plane">Travel</option>
+              <option value="home">Home</option>
+              <option value="car">Vehicle</option>
+              <option value="gift">Gift</option>
+              <option value="star">Dream goal</option>
+            </select>
+
+            <input
+              className="w-full rounded-2xl border border-border px-4 py-3"
+              onChange={(event) => setForm((current) => ({ ...current, color: event.target.value }))}
+              type="color"
+              value={form.color}
+            />
+          </div>
 
           <input
             className="w-full rounded-2xl border border-border px-4 py-3"
@@ -136,11 +162,12 @@ export function GoalsPage() {
 
           <select
             className="w-full rounded-2xl border border-border px-4 py-3"
+            data-empty={form.linkedAccountId === "" ? "true" : "false"}
             onChange={(event) => setForm((current) => ({ ...current, linkedAccountId: event.target.value }))}
             value={form.linkedAccountId}
           >
             <option value="">Optional linked account</option>
-            {accounts.map((account) => (
+            {editableAccounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {account.name}
               </option>
@@ -161,51 +188,67 @@ export function GoalsPage() {
               <p className="text-sm text-ink/65">No goals yet. Create one to start tracking savings progress.</p>
             ) : (
               goals.map((goal) => (
-                <article key={goal.id} className="rounded-2xl bg-white p-4">
-                  <div className="flex items-center justify-between gap-3">
-                    <div>
-                      <p className="font-semibold text-ink">{goal.name}</p>
+                <article key={goal.id} className="surface-panel rounded-2xl border border-border/80 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-primary/10 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-primary">
+                          {goal.icon ?? "goal"}
+                        </span>
+                        <p className="font-semibold text-ink">{goal.name}</p>
+                      </div>
                       <p className="mt-1 text-sm text-ink/55">
                         Rs {goal.currentAmount.toLocaleString("en-IN")} / Rs {goal.targetAmount.toLocaleString("en-IN")}
                       </p>
+                      {goal.targetDate ? (
+                        <p className="mt-1 text-xs font-medium uppercase tracking-[0.16em] text-ink/45">Target {goal.targetDate}</p>
+                      ) : null}
                     </div>
                     <p className="text-sm font-medium text-primary">{goal.progressPercent}%</p>
                   </div>
                   <div className="mt-3 h-3 rounded-full bg-border">
                     <div className="h-3 rounded-full bg-success" style={{ width: `${Math.min(goal.progressPercent, 100)}%` }} />
                   </div>
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <div className="flex gap-2">
-                      <input
-                        className="flex-1 rounded-2xl border border-border px-4 py-2"
-                        onChange={(event) => setContributionAmounts((current) => ({ ...current, [goal.id]: event.target.value }))}
-                        placeholder="Contribution amount"
-                        type="number"
-                        value={contributionAmounts[goal.id] ?? ""}
-                      />
-                      <button
-                        className="rounded-2xl bg-primary px-4 py-2 text-sm font-semibold text-white"
-                        onClick={() => contribute(goal.id, goal.linkedAccountId)}
-                        type="button"
-                      >
-                        Add
-                      </button>
+                  <div className="mt-5 grid gap-4 lg:grid-cols-2">
+                    <div className="rounded-2xl border border-border/70 bg-canvas/60 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/55">Add Money</p>
+                      <p className="mt-1 text-sm text-ink/55">Move extra savings into this goal.</p>
+                      <div className="mt-3 space-y-3">
+                        <input
+                          className="w-full rounded-2xl border border-border px-4 py-3"
+                          onChange={(event) => setContributionAmounts((current) => ({ ...current, [goal.id]: event.target.value }))}
+                          placeholder="Contribution amount"
+                          type="number"
+                          value={contributionAmounts[goal.id] ?? ""}
+                        />
+                        <button
+                          className="w-full rounded-2xl bg-primary px-4 py-3 text-sm font-semibold text-white"
+                          onClick={() => contribute(goal.id, goal.linkedAccountId)}
+                          type="button"
+                        >
+                          Add Contribution
+                        </button>
+                      </div>
                     </div>
-                    <div className="flex gap-2">
-                      <input
-                        className="flex-1 rounded-2xl border border-border px-4 py-2"
-                        onChange={(event) => setWithdrawAmounts((current) => ({ ...current, [goal.id]: event.target.value }))}
-                        placeholder="Withdraw amount"
-                        type="number"
-                        value={withdrawAmounts[goal.id] ?? ""}
-                      />
-                      <button
-                        className="rounded-2xl bg-ink px-4 py-2 text-sm font-semibold text-white"
-                        onClick={() => withdraw(goal.id, goal.linkedAccountId)}
-                        type="button"
-                      >
-                        Withdraw
-                      </button>
+                    <div className="rounded-2xl border border-border/70 bg-canvas/60 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-ink/55">Withdraw</p>
+                      <p className="mt-1 text-sm text-ink/55">Pull money back out if you need to reallocate it.</p>
+                      <div className="mt-3 space-y-3">
+                        <input
+                          className="w-full rounded-2xl border border-border px-4 py-3"
+                          onChange={(event) => setWithdrawAmounts((current) => ({ ...current, [goal.id]: event.target.value }))}
+                          placeholder="Withdraw amount"
+                          type="number"
+                          value={withdrawAmounts[goal.id] ?? ""}
+                        />
+                        <button
+                          className="w-full rounded-2xl bg-danger px-4 py-3 text-sm font-semibold text-white"
+                          onClick={() => withdraw(goal.id, goal.linkedAccountId)}
+                          type="button"
+                        >
+                          Withdraw Funds
+                        </button>
+                      </div>
                     </div>
                   </div>
                 </article>

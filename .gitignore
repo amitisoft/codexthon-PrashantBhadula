@@ -45,3 +45,9 @@ TestResults/
 postgres-data/
 redis-data/
 podman-data/
+backend/src/PersonalFinanceTracker.Api/App_Data/
+.azure/
+.deploy/
+
+# Local docs / planning notes
+docs/

@@ -21,6 +21,17 @@ export type Account = {
   currentBalance: number;
   institutionName: string | null;
   createdAtUtc: string;
+  isShared: boolean;
+  isOwner: boolean;
+  accessRole: "owner" | "editor" | "viewer";
+  members: Array<{
+    userId: string;
+    displayName: string;
+    email: string;
+    role: "owner" | "editor" | "viewer";
+    isOwner: boolean;
+    addedAtUtc: string;
+  }>;
 };
 
 export type Category = {
@@ -44,7 +55,28 @@ export type Transaction = {
   note: string | null;
   paymentMethod: string | null;
   tags: string[];
+  appliedRuleNames: string[];
+  needsReview: boolean;
+  createdByDisplayName: string | null;
   createdAtUtc: string;
+};
+
+export type Rule = {
+  id: string;
+  name: string;
+  isEnabled: boolean;
+  priority: number;
+  conditions: Array<{
+    field: string;
+    operator: string;
+    value: string;
+  }>;
+  actions: Array<{
+    type: string;
+    value: string | null;
+  }>;
+  createdAtUtc: string;
+  updatedAtUtc: string;
 };
 
 export type Budget = {
@@ -70,6 +102,7 @@ export type Goal = {
   targetDate: string | null;
   status: string;
   linkedAccountId: string | null;
+  icon: string | null;
   color: string | null;
 };
 
@@ -137,6 +170,64 @@ export type DashboardSummary = {
   }>;
 };
 
+export type ForecastSummary = {
+  asOfDate: string;
+  throughDate: string;
+  overview: {
+    currentBalance: number;
+    projectedEndBalance: number;
+    safeToSpend: number;
+    protectedBuffer: number;
+    expectedRecurringIncome: number;
+    expectedRecurringExpense: number;
+    expectedPatternExpense: number;
+    averageDailyExpense: number;
+    confidence: string;
+  };
+  dailyProjection: Array<{
+    date: string;
+    projectedBalance: number;
+    scheduledIncome: number;
+    scheduledExpense: number;
+    patternExpense: number;
+  }>;
+  upcomingItems: Array<{
+    recurringTransactionId: string | null;
+    title: string;
+    type: string;
+    amount: number;
+    runDate: string;
+    source: string;
+    accountName: string | null;
+    categoryName: string | null;
+  }>;
+  patternCategories: Array<{
+    categoryName: string;
+    projectedAmount: number;
+  }>;
+  assumptions: string[];
+  warnings: Array<{
+    severity: string;
+    message: string;
+  }>;
+};
+
+export type HealthScoreSummary = {
+  isAvailable: boolean;
+  unavailableReason: string | null;
+  score: number;
+  band: string;
+  summary: string;
+  factors: Array<{
+    key: string;
+    label: string;
+    score: number;
+    valueLabel: string;
+    insight: string;
+  }>;
+  suggestions: string[];
+};
+
 export type ReportsSummary = {
   totals: {
     income: number;
@@ -154,6 +245,45 @@ export type ReportsSummary = {
     income: number;
     expense: number;
   }>;
+  savingsRateTrend: Array<{
+    periodLabel: string;
+    savingsRatePercent: number;
+  }>;
+  netWorthTrend: Array<{
+    periodLabel: string;
+    netWorth: number;
+  }>;
+  accountBalanceTrend: Array<{
+    accountId: string;
+    accountName: string;
+    points: Array<{
+      periodLabel: string;
+      balance: number;
+    }>;
+  }>;
+  monthComparison: {
+    currentPeriodLabel: string;
+    previousPeriodLabel: string;
+    currentIncome: number;
+    previousIncome: number;
+    currentExpense: number;
+    previousExpense: number;
+    currentSavingsRate: number;
+    previousSavingsRate: number;
+    categoryChanges: Array<{
+      categoryName: string;
+      currentAmount: number;
+      previousAmount: number;
+      changeAmount: number;
+      changePercent: number;
+      direction: string;
+    }>;
+  };
+  insights: Array<{
+    title: string;
+    tone: string;
+    body: string;
+  }>;
   accountBalances: Array<{
     accountId: string;
     accountName: string;
@@ -169,4 +299,12 @@ export type ReportsSummary = {
     accountName: string;
     categoryName: string | null;
   }>;
+};
+
+export type NotificationItem = {
+  id: string;
+  type: string;
+  title: string;
+  body: string;
+  createdAtUtc: string;
 };
